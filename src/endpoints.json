@@ -67,6 +67,18 @@
     "llmTip": "CRITICAL: This request requires the ConsistencyLevel header set to eventual. When searching users, the $search parameter value MUST be wrapped in double quotes. Format: $search=\"your search query here\". Use KQL (Keyword Query Language) syntax to search specific properties: 'displayName:'. Examples: $search=\"displayName:john\" | $search=\"displayName:john\" OR \"displayName:jane\". Remember: ALWAYS wrap the entire search expression in double quotes and set the ConsistencyLevel header to eventual! Reference: https://learn.microsoft.com/en-us/graph/search-query-parameter"
   },
   {
+    "pathPattern": "/me/messages/{message-id}/reply",
+    "method": "post",
+    "toolName": "reply-to-mail",
+    "scopes": ["Mail.Send"]
+  },
+  {
+    "pathPattern": "/me/messages/{message-id}/replyAll",
+    "method": "post",
+    "toolName": "reply-all-to-mail",
+    "scopes": ["Mail.Send"]
+  },
+  {
     "pathPattern": "/me/messages",
     "method": "post",
     "toolName": "create-draft-email",
@@ -422,91 +434,97 @@
     "pathPattern": "/me/chats",
     "method": "get",
     "toolName": "list-chats",
-    "workScopes": ["Chat.Read"]
+    "scopes": ["Chat.Read"]
+  },
+  {
+    "pathPattern": "/chats",
+    "method": "post",
+    "toolName": "create-chat",
+    "scopes": ["Chat.Create", "Chat.ReadWrite"]
   },
   {
     "pathPattern": "/chats/{chat-id}",
     "method": "get",
     "toolName": "get-chat",
-    "workScopes": ["Chat.Read"]
+    "scopes": ["Chat.Read"]
   },
   {
     "pathPattern": "/chats/{chat-id}/messages",
     "method": "get",
     "toolName": "list-chat-messages",
-    "workScopes": ["ChatMessage.Read"]
+    "scopes": ["ChatMessage.Read"]
   },
   {
     "pathPattern": "/chats/{chat-id}/messages/{chatMessage-id}",
     "method": "get",
     "toolName": "get-chat-message",
-    "workScopes": ["ChatMessage.Read"]
+    "scopes": ["ChatMessage.Read"]
   },
   {
     "pathPattern": "/chats/{chat-id}/messages",
     "method": "post",
     "toolName": "send-chat-message",
-    "workScopes": ["ChatMessage.Send"]
+    "scopes": ["ChatMessage.Send"]
   },
   {
     "pathPattern": "/me/joinedTeams",
     "method": "get",
     "toolName": "list-joined-teams",
-    "workScopes": ["Team.ReadBasic.All"]
+    "scopes": ["Team.ReadBasic.All"]
   },
   {
     "pathPattern": "/teams/{team-id}",
     "method": "get",
     "toolName": "get-team",
-    "workScopes": ["Team.ReadBasic.All"]
+    "scopes": ["Team.ReadBasic.All"]
   },
   {
     "pathPattern": "/teams/{team-id}/channels",
     "method": "get",
     "toolName": "list-team-channels",
-    "workScopes": ["Channel.ReadBasic.All"]
+    "scopes": ["Channel.ReadBasic.All"]
   },
   {
     "pathPattern": "/teams/{team-id}/channels/{channel-id}",
     "method": "get",
     "toolName": "get-team-channel",
-    "workScopes": ["Channel.ReadBasic.All"]
+    "scopes": ["Channel.ReadBasic.All"]
   },
   {
     "pathPattern": "/teams/{team-id}/channels/{channel-id}/messages",
     "method": "get",
     "toolName": "list-channel-messages",
-    "workScopes": ["ChannelMessage.Read.All"]
+    "scopes": ["ChannelMessage.Read.All"]
   },
   {
     "pathPattern": "/teams/{team-id}/channels/{channel-id}/messages/{chatMessage-id}",
     "method": "get",
     "toolName": "get-channel-message",
-    "workScopes": ["ChannelMessage.Read.All"]
+    "scopes": ["ChannelMessage.Read.All"]
   },
   {
     "pathPattern": "/teams/{team-id}/channels/{channel-id}/messages",
     "method": "post",
     "toolName": "send-channel-message",
-    "workScopes": ["ChannelMessage.Send"]
+    "scopes": ["ChannelMessage.Send"]
   },
   {
     "pathPattern": "/teams/{team-id}/members",
     "method": "get",
     "toolName": "list-team-members",
-    "workScopes": ["TeamMember.Read.All"]
+    "scopes": ["TeamMember.Read.All"]
   },
   {
     "pathPattern": "/chats/{chat-id}/messages/{chatMessage-id}/replies",
     "method": "get",
     "toolName": "list-chat-message-replies",
-    "workScopes": ["ChatMessage.Read"]
+    "scopes": ["ChatMessage.Read"]
   },
   {
     "pathPattern": "/chats/{chat-id}/messages/{chatMessage-id}/replies",
     "method": "post",
     "toolName": "reply-to-chat-message",
-    "workScopes": ["ChatMessage.Send"]
+    "scopes": ["ChatMessage.Send"]
   },
   {
     "pathPattern": "/sites",

@@ -131,6 +131,12 @@ function buildScopesFromEndpoints(
   });
 
   const scopes = Array.from(scopesSet);
+  
+  // Ensure offline_access is included to get refresh tokens
+  if (!scopes.includes('offline_access')) {
+    scopes.push('offline_access');
+  }
+
   if (enabledToolsPattern) {
     logger.info(`Built ${scopes.length} scopes for filtered tools: ${scopes.join(', ')}`);
   }
@@ -528,6 +534,8 @@ class AuthManager {
         this.accessToken = null;
         this.tokenExpiry = null;
       }
+
+      await this.saveTokenCache();
 
       logger.info(`Removed account: ${account.username} (${accountId})`);
       return true;
