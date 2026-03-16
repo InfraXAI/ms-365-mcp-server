@@ -529,9 +529,9 @@ function registerReplyMailWithAttachment(
           const bodyTagMatch = existingBody.match(/(<body[^>]*>)/i);
           if (bodyTagMatch) {
             const insertPos = existingBody.indexOf(bodyTagMatch[0]) + bodyTagMatch[0].length;
-            combinedBody = existingBody.slice(0, insertPos) + body + '<br><hr>' + existingBody.slice(insertPos);
+            combinedBody = existingBody.slice(0, insertPos) + body + existingBody.slice(insertPos);
           } else {
-            combinedBody = body + '<br><hr>' + existingBody;
+            combinedBody = body + existingBody;
           }
         } else {
           combinedBody = body + '\n\n---\n\n' + existingBody;
