@@ -491,10 +491,9 @@ function registerReplyMailWithAttachment(
     },
     async ({ messageId, body, bodyType, attachments, to, cc }) => {
       try {
-        // Step 1: Create a draft reply (preserves the thread)
+        // Step 1: Create a draft reply WITHOUT body (preserves the thread trail)
         const createReplyPayload: Record<string, unknown> = {
           message: {
-            body: { contentType: bodyType || 'html', content: body },
             ...(to && { toRecipients: to.map(r => ({ emailAddress: { name: r.name, address: r.address } })) }),
             ...(cc && { ccRecipients: cc.map(r => ({ emailAddress: { name: r.name, address: r.address } })) }),
           },
@@ -506,11 +505,13 @@ function registerReplyMailWithAttachment(
           body: JSON.stringify(createReplyPayload),
         });
 
-        // Parse draft response to get the draft message ID
+        // Parse draft response to get the draft message ID and existing body
         let draftId: string;
+        let existingBody: string = '';
         try {
           const draftData = JSON.parse(draftResponse.content[0].text);
           draftId = draftData.id;
+          existingBody = draftData.body?.content || '';
           if (!draftId) throw new Error('No draft ID returned');
         } catch (e) {
           return {
@@ -519,7 +520,33 @@ function registerReplyMailWithAttachment(
           };
         }
 
-        // Step 2: Attach files to the draft
+        // Step 2: Prepend reply body before the existing thread trail
+        const contentType = bodyType || 'html';
+        let combinedBody: string;
+        if (contentType === 'html') {
+          // Insert new reply HTML before the existing thread body
+          // The existing body typically has <html><head>...</head><body>..thread content..</body></html>
+          const bodyTagMatch = existingBody.match(/(<body[^>]*>)/i);
+          if (bodyTagMatch) {
+            const insertPos = existingBody.indexOf(bodyTagMatch[0]) + bodyTagMatch[0].length;
+            combinedBody = existingBody.slice(0, insertPos) + body + '<br><hr>' + existingBody.slice(insertPos);
+          } else {
+            combinedBody = body + '<br><hr>' + existingBody;
+          }
+        } else {
+          combinedBody = body + '\n\n---\n\n' + existingBody;
+        }
+
+        // Update the draft with the combined body
+        await graphClient.graphRequest(`/me/messages/${draftId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            body: { contentType: 'html', content: combinedBody },
+          }),
+        });
+
+        // Step 3: Attach files to the draft (if any)
         if (attachments && attachments.length > 0) {
           for (const att of attachments) {
             const filePath = att.filePath.startsWith('~')
@@ -574,7 +601,7 @@ function registerReplyMailWithAttachment(
           }
         }
 
-        // Step 3: Send the draft
+        // Step 4: Send the draft
         await graphClient.graphRequest(`/me/messages/${draftId}/send`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
