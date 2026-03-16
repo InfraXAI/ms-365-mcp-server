@@ -3,7 +3,7 @@ import logger from './logger.js';
 import GraphClient from './graph-client.js';
 import { api } from './generated/client.js';
 import { z } from 'zod';
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { TOOL_CATEGORIES } from './tool-categories.js';
@@ -323,6 +323,138 @@ async function executeGraphTool(
   }
 }
 
+/**
+ * Register the custom send-mail-with-attachment tool.
+ * This tool reads files from local disk and sends them as email attachments
+ * via the Graph API, bypassing MCP's parameter size limitations.
+ */
+function registerSendMailWithAttachment(
+  server: McpServer,
+  graphClient: GraphClient
+): void {
+  server.tool(
+    'send-mail-with-attachment',
+    'Send an email with file attachments from local disk. Use this instead of send-mail when you need to attach files — it reads files from the filesystem and base64-encodes them automatically.',
+    {
+      to: z.array(z.object({
+        name: z.string().optional().describe('Display name of the recipient'),
+        address: z.string().describe('Email address of the recipient'),
+      })).describe('List of recipients'),
+      subject: z.string().describe('Email subject'),
+      body: z.string().describe('Email body content (HTML supported)'),
+      bodyType: z.enum(['text', 'html']).default('html').describe('Body content type'),
+      attachments: z.array(z.object({
+        filePath: z.string().describe('Absolute path to the file on local disk'),
+        name: z.string().optional().describe('Override filename for the attachment (default: original filename)'),
+      })).describe('List of files to attach from local filesystem'),
+      cc: z.array(z.object({
+        name: z.string().optional(),
+        address: z.string(),
+      })).optional().describe('CC recipients'),
+      bcc: z.array(z.object({
+        name: z.string().optional(),
+        address: z.string(),
+      })).optional().describe('BCC recipients'),
+      saveToSentItems: z.boolean().default(true).describe('Save to Sent Items folder'),
+    },
+    {
+      title: 'send-mail-with-attachment',
+      readOnlyHint: false,
+      destructiveHint: false,
+      openWorldHint: true,
+    },
+    async ({ to, subject, body, bodyType, attachments, cc, bcc, saveToSentItems }) => {
+      try {
+        // Build attachments from local files
+        const fileAttachments = [];
+        for (const att of attachments) {
+          const filePath = att.filePath.startsWith('~')
+            ? att.filePath.replace('~', process.env.HOME || '')
+            : att.filePath;
+
+          if (!existsSync(filePath)) {
+            return {
+              content: [{ type: 'text' as const, text: JSON.stringify({ error: `File not found: ${filePath}` }) }],
+              isError: true,
+            };
+          }
+
+          const fileBuffer = readFileSync(filePath);
+          const base64Content = fileBuffer.toString('base64');
+          const fileName = att.name || path.basename(filePath);
+          const ext = path.extname(fileName).toLowerCase();
+
+          // Map common extensions to MIME types
+          const mimeTypes: Record<string, string> = {
+            '.pdf': 'application/pdf',
+            '.doc': 'application/msword',
+            '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            '.xls': 'application/vnd.ms-excel',
+            '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            '.ppt': 'application/vnd.ms-powerpoint',
+            '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+            '.png': 'image/png',
+            '.jpg': 'image/jpeg',
+            '.jpeg': 'image/jpeg',
+            '.gif': 'image/gif',
+            '.zip': 'application/zip',
+            '.csv': 'text/csv',
+            '.txt': 'text/plain',
+            '.html': 'text/html',
+            '.json': 'application/json',
+          };
+
+          fileAttachments.push({
+            '@odata.type': '#microsoft.graph.fileAttachment',
+            name: fileName,
+            contentType: mimeTypes[ext] || 'application/octet-stream',
+            contentBytes: base64Content,
+          });
+
+          logger.info(`Attached file: ${fileName} (${fileBuffer.length} bytes)`);
+        }
+
+        // Build the sendMail payload
+        const payload: Record<string, unknown> = {
+          Message: {
+            subject,
+            body: { contentType: bodyType || 'html', content: body },
+            toRecipients: to.map(r => ({ emailAddress: { name: r.name, address: r.address } })),
+            attachments: fileAttachments,
+            ...(cc && { ccRecipients: cc.map(r => ({ emailAddress: { name: r.name, address: r.address } })) }),
+            ...(bcc && { bccRecipients: bcc.map(r => ({ emailAddress: { name: r.name, address: r.address } })) }),
+          },
+          SaveToSentItems: saveToSentItems ?? true,
+        };
+
+        const response = await graphClient.graphRequest('/me/sendMail', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+
+        // sendMail returns 202 with empty body on success
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({
+              success: true,
+              message: `Email sent to ${to.map(r => r.address).join(', ')} with ${fileAttachments.length} attachment(s)`,
+              attachments: fileAttachments.map(a => ({ name: a.name, contentType: a.contentType })),
+            }),
+          }],
+        };
+      } catch (error) {
+        logger.error(`Error sending email with attachment: ${(error as Error).message}`);
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify({ error: (error as Error).message }) }],
+          isError: true,
+        };
+      }
+    }
+  );
+}
+
 export function registerGraphTools(
   server: McpServer,
   graphClient: GraphClient,
@@ -425,6 +557,12 @@ export function registerGraphTools(
       logger.error(`Failed to register tool ${tool.alias}: ${(error as Error).message}`);
       failedCount++;
     }
+  }
+
+  // Register custom tools
+  if (!readOnly) {
+    registerSendMailWithAttachment(server, graphClient);
+    registeredCount++;
   }
 
   logger.info(
