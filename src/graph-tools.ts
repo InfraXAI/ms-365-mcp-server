@@ -455,6 +455,152 @@ function registerSendMailWithAttachment(
   );
 }
 
+/**
+ * Register the custom reply-mail-with-attachment tool.
+ * Creates a draft reply (preserving the thread), attaches files from disk, then sends.
+ */
+function registerReplyMailWithAttachment(
+  server: McpServer,
+  graphClient: GraphClient
+): void {
+  server.tool(
+    'reply-mail-with-attachment',
+    'Reply to an existing email thread with file attachments. Preserves the full conversation thread. Use this to reply to a specific message ID with files attached from local disk.',
+    {
+      messageId: z.string().describe('The ID of the message to reply to (from list-mail-messages or get-mail-message)'),
+      body: z.string().describe('Reply body content (HTML supported)'),
+      bodyType: z.enum(['text', 'html']).default('html').describe('Body content type'),
+      attachments: z.array(z.object({
+        filePath: z.string().describe('Absolute path to the file on local disk'),
+        name: z.string().optional().describe('Override filename for the attachment'),
+      })).optional().describe('List of files to attach from local filesystem'),
+      to: z.array(z.object({
+        name: z.string().optional(),
+        address: z.string(),
+      })).optional().describe('Override To recipients (default: reply to sender + all recipients)'),
+      cc: z.array(z.object({
+        name: z.string().optional(),
+        address: z.string(),
+      })).optional().describe('Override CC recipients'),
+    },
+    {
+      title: 'reply-mail-with-attachment',
+      readOnlyHint: false,
+      destructiveHint: false,
+      openWorldHint: true,
+    },
+    async ({ messageId, body, bodyType, attachments, to, cc }) => {
+      try {
+        // Step 1: Create a draft reply (preserves the thread)
+        const createReplyPayload: Record<string, unknown> = {
+          message: {
+            body: { contentType: bodyType || 'html', content: body },
+            ...(to && { toRecipients: to.map(r => ({ emailAddress: { name: r.name, address: r.address } })) }),
+            ...(cc && { ccRecipients: cc.map(r => ({ emailAddress: { name: r.name, address: r.address } })) }),
+          },
+        };
+
+        const draftResponse = await graphClient.graphRequest(`/me/messages/${messageId}/createReply`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(createReplyPayload),
+        });
+
+        // Parse draft response to get the draft message ID
+        let draftId: string;
+        try {
+          const draftData = JSON.parse(draftResponse.content[0].text);
+          draftId = draftData.id;
+          if (!draftId) throw new Error('No draft ID returned');
+        } catch (e) {
+          return {
+            content: [{ type: 'text' as const, text: JSON.stringify({ error: `Failed to create draft reply: ${(e as Error).message}` }) }],
+            isError: true,
+          };
+        }
+
+        // Step 2: Attach files to the draft
+        if (attachments && attachments.length > 0) {
+          for (const att of attachments) {
+            const filePath = att.filePath.startsWith('~')
+              ? att.filePath.replace('~', process.env.HOME || '')
+              : att.filePath;
+
+            if (!existsSync(filePath)) {
+              return {
+                content: [{ type: 'text' as const, text: JSON.stringify({ error: `File not found: ${filePath}` }) }],
+                isError: true,
+              };
+            }
+
+            const fileBuffer = readFileSync(filePath);
+            const base64Content = fileBuffer.toString('base64');
+            const fileName = att.name || path.basename(filePath);
+            const ext = path.extname(fileName).toLowerCase();
+
+            const mimeTypes: Record<string, string> = {
+              '.pdf': 'application/pdf',
+              '.doc': 'application/msword',
+              '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+              '.xls': 'application/vnd.ms-excel',
+              '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+              '.ppt': 'application/vnd.ms-powerpoint',
+              '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+              '.png': 'image/png',
+              '.jpg': 'image/jpeg',
+              '.jpeg': 'image/jpeg',
+              '.gif': 'image/gif',
+              '.zip': 'application/zip',
+              '.csv': 'text/csv',
+              '.txt': 'text/plain',
+              '.html': 'text/html',
+              '.json': 'application/json',
+            };
+
+            const attachPayload = {
+              '@odata.type': '#microsoft.graph.fileAttachment',
+              name: fileName,
+              contentType: mimeTypes[ext] || 'application/octet-stream',
+              contentBytes: base64Content,
+            };
+
+            await graphClient.graphRequest(`/me/messages/${draftId}/attachments`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(attachPayload),
+            });
+
+            logger.info(`Attached file to reply draft: ${fileName} (${fileBuffer.length} bytes)`);
+          }
+        }
+
+        // Step 3: Send the draft
+        await graphClient.graphRequest(`/me/messages/${draftId}/send`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+        });
+
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({
+              success: true,
+              message: `Reply sent on thread (messageId: ${messageId}) with ${attachments?.length || 0} attachment(s)`,
+              attachments: attachments?.map(a => a.name || path.basename(a.filePath)) || [],
+            }),
+          }],
+        };
+      } catch (error) {
+        logger.error(`Error replying with attachment: ${(error as Error).message}`);
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify({ error: (error as Error).message }) }],
+          isError: true,
+        };
+      }
+    }
+  );
+}
+
 export function registerGraphTools(
   server: McpServer,
   graphClient: GraphClient,
@@ -562,7 +708,8 @@ export function registerGraphTools(
   // Register custom tools
   if (!readOnly) {
     registerSendMailWithAttachment(server, graphClient);
-    registeredCount++;
+    registerReplyMailWithAttachment(server, graphClient);
+    registeredCount += 2;
   }
 
   logger.info(
