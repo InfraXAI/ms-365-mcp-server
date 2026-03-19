@@ -467,6 +467,12 @@
     "scopes": ["ChatMessage.Send"]
   },
   {
+    "pathPattern": "/chats/{chat-id}/messages/{chatMessage-id}",
+    "method": "patch",
+    "toolName": "update-chat-message",
+    "scopes": ["Chat.ReadWrite"]
+  },
+  {
     "pathPattern": "/me/joinedTeams",
     "method": "get",
     "toolName": "list-joined-teams",
